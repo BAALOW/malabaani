@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import useShopContext from "../ShopContext";
 import API from "../api";
 
 const Product = ({ product }) => {
 
+    const navigate = useNavigate();
     const { addToCart, removeFromCart, products } = useShopContext();
     const [IsInCart, setIsInCart] = useState(false);
     const [rating, setRating] = useState(0);
@@ -12,6 +14,8 @@ const Product = ({ product }) => {
     const [reviews, setReviews] = useState([]);
     const [isFavorite, setIsFavorite] = useState(false);
     const [heartPop, setHeartPop] = useState(false);
+
+    const goToDetails = () => navigate(`/product/${product._id}`);
 
     // ✅ CHECK CART
     useEffect(() => {
@@ -106,8 +110,8 @@ const Product = ({ product }) => {
                 }}
             >
 
-                {/* Image */}
-                <div style={styles.imgWrap}>
+                {/* Image (click → Product Details) */}
+                <div style={styles.imgWrap} onClick={goToDetails}>
                     <img
                         className="card-img"
                         src={product.urlImage}
@@ -141,8 +145,10 @@ const Product = ({ product }) => {
                 {/* Body */}
                 <div style={styles.body}>
 
-                    {/* Title */}
-                    <p style={styles.title}>{product.name}</p>
+                    {/* Title (click → Product Details) */}
+                    <p style={styles.title} onClick={goToDetails}>
+                        {product.name}
+                    </p>
 
                     {/* Stars + Price row */}
                     <div style={styles.metaRow}>
@@ -259,6 +265,7 @@ const styles = {
         overflow: "hidden",
         flexShrink: 0,
         position: "relative",
+        cursor: "pointer",
     },
     img: {
         width: "100%",
@@ -300,6 +307,7 @@ const styles = {
         color: "#111",
         lineHeight: "1.2",
         textTransform: "capitalize",
+        cursor: "pointer",
     },
 
     /* ── META ROW (stars + price) ── */

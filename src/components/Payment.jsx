@@ -1,14 +1,11 @@
-import { useState, useContext } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import useShopContext from "../ShopContext";
-import { AuthContext } from "../context/AuthContext";
-import { useNotification } from "../context/NotificationContext"; // ✅
-import API from "../api";
+import { useNotification } from "../context/NotificationContext";
 
 const Payment = () => {
-    const { products, total, clearCart } = useShopContext();
-    const { user } = useContext(AuthContext);
-    const { showNotification } = useNotification(); // ✅
+    const { products } = useShopContext();
+    const { showNotification } = useNotification();
     const navigate = useNavigate();
 
     const intialPayment = {
@@ -19,8 +16,6 @@ const Payment = () => {
 
     const [paymentMethods, setPaymentMethods] = useState(intialPayment);
     const [phone, setPhone] = useState("");
-    const [showModal, setShowModal] = useState(false);
-    const [loading, setLoading] = useState(false);
 
     const getSelectedPayment = () => {
         if (paymentMethods.evc) return "EVC";
@@ -29,6 +24,7 @@ const Payment = () => {
         return "";
     };
 
+    // ✅ Hubi xogta, kadib u gudub Checkout page
     const handleProceed = () => {
         const isSelected =
             paymentMethods.evc ||
@@ -36,49 +32,27 @@ const Payment = () => {
             paymentMethods.zaaad;
 
         if (!isSelected) {
-            showNotification("Please select a payment method! ⚠️", "error"); // ✅
+            showNotification("Please select a payment method! ⚠️", "error");
             return;
         }
 
         if (products.length === 0) {
-            showNotification("Your cart is empty! 🛒", "error"); // ✅
+            showNotification("Your cart is empty! 🛒", "error");
             return;
         }
 
         const phoneRegex = /^061\d{7}$/;
         if (!phoneRegex.test(phone)) {
-            showNotification("Phone number is not valid! ❌", "error"); // ✅
+            showNotification("Phone number is not valid! ❌", "error");
             return;
         }
 
-        setShowModal(true);
-    };
-
-    // ✅ MARKA CONFIRM LA DHUFTO - ORDER LA KEYDIYO
-    const handleConfirm = async () => {
-        setLoading(true);
-        try {
-            const token = localStorage.getItem("token");
-
-            await API.post("/orders/place", {
-                items: products,
-                total: total,
+        navigate("/checkout", {
+            state: {
                 paymentMethod: getSelectedPayment(),
                 phone: phone
-            }, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-
-            clearCart();
-            setShowModal(false);
-            showNotification("Order placed successfully! 🎉", "success"); // ✅
-            navigate("/orders");
-
-        } catch (err) {
-            console.log(err);
-            showNotification("Order failed! Please try again ❌", "error"); // ✅
-        }
-        setLoading(false);
+            }
+        });
     };
 
     return (
@@ -116,50 +90,8 @@ const Payment = () => {
             />
 
             <button className="btn-proceeed" onClick={handleProceed}>
-                Proceed
+                Proceed to Checkout
             </button>
-
-            {/* MODAL */}
-            {showModal && (
-                <div className="modal">
-                    <div className="modal-content">
-
-                        <h2>Order Summary</h2>
-
-                        <h3>Products</h3>
-                        {products.map((p, i) => (
-                            <div key={i} className="modal-product">
-                                <img src={p.urlImage} alt="" />
-                                <span>{p.name}</span>
-                                <span>{p.quantity} x ${p.price}</span>
-                            </div>
-                        ))}
-
-                        <h4>Total: ${total}</h4>
-
-                        <h3>Payment Info</h3>
-                        <p>Method: {getSelectedPayment()}</p>
-                        <p>Phone: {phone}</p>
-
-                        <div className="modal-buttons">
-                            <button
-                                className="close-btn"
-                                onClick={() => setShowModal(false)}
-                            >
-                                Close
-                            </button>
-
-                            <button
-                                className="confirm-btn"
-                                onClick={handleConfirm}
-                                disabled={loading}
-                            >
-                                {loading ? "Saving..." : "Confirm ✅"}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
         </div>
     );
 };

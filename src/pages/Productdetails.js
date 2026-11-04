@@ -4,6 +4,14 @@ import API from "../api";
 import useShopContext from "../ShopContext";
 import "../style.css";
 
+// Qoraal xirfadle ah haddii alaabtu aysan lahayn description
+const buildDescription = (p) => {
+  if (p.description && p.description.trim()) return p.description;
+  const name = p.name;
+  const cat = p.category ? p.category.toLowerCase() : "menu";
+  return `Our ${name} is carefully prepared from fresh, high-quality ingredients and served with a strong focus on taste and presentation. Every order is made to satisfy, whether you are enjoying a quick meal or sharing with family and friends. A favourite from our ${cat} selection, it delivers consistent flavour in every bite.`;
+};
+
 export default function ProductDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -19,11 +27,8 @@ export default function ProductDetails() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const isInCart = product
-    ? cartItems.some((p) => p._id === product._id)
-    : false;
+  const isInCart = product ? cartItems.some((p) => p._id === product._id) : false;
 
-  // Soo qaado alaabta, related, reviews, favorite
   useEffect(() => {
     const load = async () => {
       try {
@@ -122,14 +127,23 @@ export default function ProductDetails() {
     );
   }
 
+  const total = Number(product.price) * qty;
+
   return (
     <div className="pd-page">
-      <nav className="pd-breadcrumb">
-        <Link to="/home">Home</Link> /{" "}
-        {product.category && <span>{product.category} / </span>}
-        <strong>{product.name}</strong>
-      </nav>
+      {/* Top bar: Back + breadcrumb */}
+      <div className="pd-topbar">
+        <button className="pd-back" onClick={() => navigate("/home")}>
+          ← Back to Home
+        </button>
+        <nav className="pd-breadcrumb">
+          <Link to="/home">Home</Link> /{" "}
+          {product.category && <span>{product.category} / </span>}
+          <strong>{product.name}</strong>
+        </nav>
+      </div>
 
+      {/* Main card */}
       <div className="pd-main">
         <div className="pd-image">
           <img src={product.urlImage} alt={product.name} />
@@ -143,9 +157,21 @@ export default function ProductDetails() {
         </div>
 
         <div className="pd-info">
-          {product.category && (
-            <span className="pd-category">{product.category}</span>
-          )}
+          <div className="pd-head">
+            {product.category ? (
+              <span className="pd-category">{product.category}</span>
+            ) : (
+              <span />
+            )}
+            <button
+              className="pd-close"
+              title="Close"
+              onClick={() => navigate("/home")}
+            >
+              ✕
+            </button>
+          </div>
+
           <h1>{product.name}</h1>
 
           <div className="pd-rating">
@@ -153,7 +179,9 @@ export default function ProductDetails() {
               <>
                 <span className="pd-stars">{stars(avgRating)}</span>
                 <strong>{avgRating}</strong>
-                <span className="pd-muted">({totalReviews})</span>
+                <span className="pd-muted">
+                  ({totalReviews} {totalReviews === 1 ? "review" : "reviews"})
+                </span>
               </>
             ) : (
               <span className="pd-muted">No reviews yet</span>
@@ -162,46 +190,100 @@ export default function ProductDetails() {
 
           <div className="pd-price">${Number(product.price).toFixed(2)}</div>
 
-          {product.description && (
-            <p className="pd-desc">{product.description}</p>
-          )}
+          <p className="pd-desc">{buildDescription(product)}</p>
 
-          <div className="pd-actions">
-            {!isInCart && (
+          {/* Highlights */}
+          <div className="pd-features">
+            <div className="pd-feature">
+              <span>🥗</span>
+              <div>
+                <strong>Fresh Ingredients</strong>
+                <small>Prepared daily</small>
+              </div>
+            </div>
+            <div className="pd-feature">
+              <span>🚚</span>
+              <div>
+                <strong>Fast Delivery</strong>
+                <small>Hot &amp; on time</small>
+              </div>
+            </div>
+            <div className="pd-feature">
+              <span>⭐</span>
+              <div>
+                <strong>Quality Guaranteed</strong>
+                <small>Top-rated taste</small>
+              </div>
+            </div>
+          </div>
+
+          {/* Quantity + total */}
+          {!isInCart && (
+            <div className="pd-qtyrow">
               <div className="pd-qty">
                 <button onClick={() => setQty((q) => Math.max(1, q - 1))}>−</button>
                 <span>{qty}</span>
                 <button onClick={() => setQty((q) => q + 1)}>+</button>
               </div>
-            )}
+              <div className="pd-total">
+                Total: <strong>${total.toFixed(2)}</strong>
+              </div>
+            </div>
+          )}
+
+          {/* Actions */}
+          <div className="pd-actions">
             <button
               className={`pd-add ${isInCart ? "remove" : ""}`}
               onClick={handleCart}
             >
               🛒 {isInCart ? "Remove from Cart" : "Add to Cart"}
             </button>
+            <button className="pd-cancel" onClick={() => navigate("/home")}>
+              Cancel
+            </button>
           </div>
         </div>
       </div>
 
+      {/* Reviews */}
       <section className="pd-section">
         <h2>Customer Reviews</h2>
         {reviews.length === 0 ? (
-          <p className="pd-muted">Weli review ma jiro.</p>
+          <p className="pd-muted">No reviews yet. Be the first to review this item.</p>
         ) : (
-          reviews.map((r, i) => (
-            <div key={r._id || i} className="pd-review">
-              <strong>{r.user?.name || "User"}</strong>
-              <span className="pd-stars"> {stars(r.rating)}</span>
-              <p>"{r.comment}"</p>
-            </div>
-          ))
+          <div className="pd-reviews">
+            {reviews.map((r, i) => (
+              <div key={r._id || i} className="pd-review">
+                <div className="pd-review-head">
+                  <div className="pd-avatar">
+                    {r.user?.name?.charAt(0).toUpperCase() || "U"}
+                  </div>
+                  <div>
+                    <strong>{r.user?.name || "User"}</strong>
+                    {r.createdAt && (
+                      <small>
+                        {new Date(r.createdAt).toLocaleDateString("en-US", {
+                          year: "numeric",
+                          month: "short",
+                          day: "numeric",
+                        })}
+                      </small>
+                    )}
+                  </div>
+                  <span className="pd-stars pd-review-stars">{stars(r.rating)}</span>
+                </div>
+                <p>"{r.comment}"</p>
+              </div>
+            ))}
+          </div>
         )}
       </section>
 
+      {/* Related */}
       {related.length > 0 && (
         <section className="pd-section">
-          <h2>Related Products</h2>
+          <h2>You may also like</h2>
           <div className="pd-related">
             {related.map((p) => (
               <Link to={`/product/${p._id}`} key={p._id} className="pd-card">

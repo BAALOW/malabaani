@@ -6,30 +6,121 @@ const Order = require("../models/Order");
 const Review = require("../models/Review");
 const Product = require("../models/Product");
 
-// ✅ Models list — rate limit hadduu gaaro, kan xiga isku day
+// ✅ Models cusub (kuwii hore waa deprecated). Ugu horreeya = ugu dhaqsaha.
 const MODELS = [
-  "llama-3.1-8b-instant",      // aad u dhaqso, limit weyn
-  "gemma2-9b-it",               // Google model, limit gooni
-  "llama3-8b-8192",             // backup
+  "llama-3.1-8b-instant",
+  "llama-3.3-70b-versatile",
+  "openai/gpt-oss-20b",
+  "meta-llama/llama-4-scout-17b-16e-instruct",
 ];
 
-const callGroq = async (messages, model) => {
-  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+const MAX_HISTORY = 8;        // fariimaha ugu dambeeya ee loo diro AI
+const MAX_TOKENS = 600;       // 1000 ahaa -> waxay cunaysay TPM
+const DEFAULT_WAIT_SEC = 20;
+
+// ✅ Model kasta cooldown u gaar ah (rate limit ama model-ka oo meesha ka maqan)
+const cooldowns = {}; // { modelName: timestampMs }
+
+const isCoolingDown = (model) => (cooldowns[model] || 0) > Date.now();
+const secondsLeft = (model) =>
+  Math.max(1, Math.ceil(((cooldowns[model] || 0) - Date.now()) / 1000));
+
+const callGroq = (messages, model) =>
+  fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${process.env.GROQ_API_KEY}`
+      Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
     },
     body: JSON.stringify({
       model,
       messages,
-      max_tokens: 1000,
+      max_tokens: MAX_TOKENS,
       temperature: 0.3,
-      response_format: { type: "json_object" }
-    })
+      response_format: { type: "json_object" },
+    }),
   });
-  return response;
+
+// ✅ Admin stats cache (60s) si DB-ga loogu garaacin codsi kasta
+let statsCache = { data: null, time: 0 };
+const STATS_TTL = 60 * 1000;
+
+const getAdminStats = async () => {
+  if (statsCache.data && Date.now() - statsCache.time < STATS_TTL) {
+    return statsCache.data;
+  }
+
+  const [totalUsers, totalOrders, totalReviews, totalProducts] = await Promise.all([
+    User.countDocuments({ role: "user" }),
+    Order.countDocuments(),
+    Review.countDocuments(),
+    Product.countDocuments(),
+  ]);
+
+  // Hal mar ayaa orders loo akhriyaa (hore waa saddex jeer)
+  const orders = await Order.find().select("total items").lean();
+
+  const totalRevenue = orders.reduce((acc, o) => acc + (Number(o.total) || 0), 0);
+
+  const productSales = {};
+  orders.forEach((order) => {
+    order.items?.forEach((item) => {
+      const name = item.name || item.product?.name || "Unknown";
+      productSales[name] = (productSales[name] || 0) + (item.quantity || 1);
+    });
+  });
+  const topProducts = Object.entries(productSales)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([name, count]) => ({ name, count }));
+
+  const recentOrders = await Order.find()
+    .populate("user", "name email")
+    .sort({ createdAt: -1 })
+    .limit(5);
+
+  const recentUsers = await User.find({ role: "user" })
+    .select("name email createdAt")
+    .sort({ createdAt: -1 })
+    .limit(5);
+
+  const data = {
+    totalUsers,
+    totalOrders,
+    totalRevenue: totalRevenue.toFixed(2),
+    totalReviews,
+    totalProducts,
+    recentOrders: recentOrders.map((o) => ({
+      user: o.user?.name || "Unknown",
+      total: o.total,
+      status: o.status,
+      date: new Date(o.createdAt).toLocaleDateString(),
+    })),
+    topProducts,
+    recentUsers: recentUsers.map((u) => ({
+      name: u.name,
+      email: u.email,
+      joined: new Date(u.createdAt).toLocaleDateString(),
+    })),
+  };
+
+  statsCache = { data, time: Date.now() };
+  return data;
 };
+
+const busyReply = (retryAfter) => ({
+  error: "All AI models are busy.",
+  retryAfter,
+  content: [
+    {
+      text: JSON.stringify({
+        message: `AI-gu hadda mashquul buu yahay. Fadlan ${retryAfter} ilbiriqsi kadib isku day.\nThe AI is busy right now. Please try again in ${retryAfter} seconds.`,
+        options: null,
+        recommendations: null,
+      }),
+    },
+  ],
+});
 
 router.post("/chat", async (req, res) => {
   try {
@@ -49,61 +140,9 @@ router.post("/chat", async (req, res) => {
           : adminToken;
 
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        console.log("✅ Admin token decoded:", decoded);
 
         if (decoded) {
-          const totalUsers = await User.countDocuments({ role: "user" });
-          const totalOrders = await Order.countDocuments();
-          const totalReviews = await Review.countDocuments();
-          const totalProducts = await Product.countDocuments();
-
-          const orders = await Order.find();
-          const totalRevenue = orders.reduce((acc, o) => acc + (Number(o.total) || 0), 0);
-
-          const recentOrders = await Order.find()
-            .populate("user", "name email")
-            .sort({ createdAt: -1 })
-            .limit(5);
-
-          const recentUsers = await User.find({ role: "user" })
-            .select("name email createdAt")
-            .sort({ createdAt: -1 })
-            .limit(5);
-
-          const allOrders = await Order.find();
-          const productSales = {};
-          allOrders.forEach(order => {
-            order.items?.forEach(item => {
-              const name = item.name || item.product?.name || "Unknown";
-              productSales[name] = (productSales[name] || 0) + (item.quantity || 1);
-            });
-          });
-          const topProducts = Object.entries(productSales)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 3)
-            .map(([name, count]) => ({ name, count }));
-
-          adminStats = {
-            totalUsers,
-            totalOrders,
-            totalRevenue: totalRevenue.toFixed(2),
-            totalReviews,
-            totalProducts,
-            recentOrders: recentOrders.map(o => ({
-              user: o.user?.name || "Unknown",
-              total: o.total,
-              status: o.status,
-              date: new Date(o.createdAt).toLocaleDateString()
-            })),
-            topProducts,
-            recentUsers: recentUsers.map(u => ({
-              name: u.name,
-              email: u.email,
-              joined: new Date(u.createdAt).toLocaleDateString()
-            }))
-          };
-
-          console.log("✅ Admin stats fetched:", adminStats);
+          adminStats = await getAdminStats();
         }
       } catch (err) {
         console.error("❌ Token/Stats error:", err.message);
@@ -117,92 +156,104 @@ router.post("/chat", async (req, res) => {
       finalSystem = `You are "Malabaani Admin AI". Answer using ONLY this REAL data. Never invent numbers.
 
 === REAL DATABASE STATS ===
-👥 Total Users: ${adminStats.totalUsers}
-📦 Total Orders: ${adminStats.totalOrders}
-💰 Total Revenue: $${adminStats.totalRevenue}
-⭐ Total Reviews: ${adminStats.totalReviews}
-🍽️ Total Products: ${adminStats.totalProducts}
+Total Users: ${adminStats.totalUsers}
+Total Orders: ${adminStats.totalOrders}
+Total Revenue: $${adminStats.totalRevenue}
+Total Reviews: ${adminStats.totalReviews}
+Total Products: ${adminStats.totalProducts}
 
-🔥 Top Products:
-${adminStats.topProducts.length > 0
-  ? adminStats.topProducts.map((p, i) => `${i + 1}. ${p.name} — ${p.count} orders`).join("\n")
-  : "No sales data yet"}
+Top Products:
+${
+  adminStats.topProducts.length > 0
+    ? adminStats.topProducts.map((p, i) => `${i + 1}. ${p.name} - ${p.count} orders`).join("\n")
+    : "No sales data yet"
+}
 
-📋 Recent Orders:
-${adminStats.recentOrders.map(o => `- ${o.user} | $${o.total} | ${o.status} | ${o.date}`).join("\n")}
+Recent Orders:
+${adminStats.recentOrders.map((o) => `- ${o.user} | $${o.total} | ${o.status} | ${o.date}`).join("\n")}
 
-👥 Recent Users:
-${adminStats.recentUsers.map(u => `- ${u.name} (${u.email})`).join("\n")}
+Recent Users:
+${adminStats.recentUsers.map((u) => `- ${u.name} (${u.email})`).join("\n")}
 ===========================
 
 RULES:
-- Use ONLY numbers above — NEVER make up data
-- Respond in BOTH Somali AND English
+- Use ONLY numbers above - NEVER make up data
+- Respond in ENGLISH ONLY
 - Be concise
 
 Respond ONLY with valid JSON:
 {
-  "message": "Somali\nEnglish",
+  "message": "English answer",
   "options": ["q1", "q2"] or null,
   "recommendations": null
 }`;
     }
 
+    // ✅ Taariikhda gaabi (kaliya fariimaha ugu dambeeya)
+    const trimmed = messages.slice(-MAX_HISTORY);
+
     const groqMessages = [
       {
         role: "system",
-        content: finalSystem + "\n\nOutput ONLY valid JSON. No markdown. No extra text."
+        content: finalSystem + "\n\nOutput ONLY valid JSON. No markdown. No extra text.",
       },
-      ...messages.map(m => ({
+      ...trimmed.map((m) => ({
         role: m.role === "assistant" ? "assistant" : "user",
-        content: m.content
-      }))
+        content: String(m.content || ""),
+      })),
     ];
 
-    // ✅ Models fallback — hadduu mid rate limit gaaro, kan xiga isku day
+    // ✅ Models fallback + cooldown
     let text = "";
     let success = false;
 
     for (const model of MODELS) {
+      if (isCoolingDown(model)) {
+        console.log(`⏭️ ${model} cooling down (${secondsLeft(model)}s)`);
+        continue;
+      }
+
       try {
         console.log(`Trying model: ${model}`);
         const response = await callGroq(groqMessages, model);
 
         if (response.status === 429) {
-          console.log(`❌ ${model} rate limited, trying next...`);
+          const retryAfter = parseInt(response.headers.get("retry-after"), 10) || DEFAULT_WAIT_SEC;
+          cooldowns[model] = Date.now() + retryAfter * 1000;
+          console.log(`❌ ${model} rate limited, wait ${retryAfter}s. Trying next...`);
           continue;
         }
 
         if (!response.ok) {
-          const errData = await response.json();
-          console.error(`❌ ${model} error:`, errData);
+          const errData = await response.json().catch(() => ({}));
+          console.error(`❌ ${model} error:`, errData?.error?.message || response.status);
+          // Model-ka jabay / lagu waayay: 10 daqiiqo ka tag
+          cooldowns[model] = Date.now() + 10 * 60 * 1000;
           continue;
         }
 
         const data = await response.json();
         text = data.choices?.[0]?.message?.content || "";
         text = text.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+
+        if (!text) continue;
+
         success = true;
         console.log(`✅ Success with model: ${model}`);
         break;
-
       } catch (err) {
         console.error(`❌ ${model} failed:`, err.message);
+        cooldowns[model] = Date.now() + 30 * 1000;
         continue;
       }
     }
 
     if (!success) {
-      return res.status(429).json({
-        error: "All models rate limited. Please wait a few minutes and try again.",
-        content: [{
-          text: JSON.stringify({
-            message: "Waqti yar sug oo isku day — AI-gu hadda mashquul buu yahay.\nAll AI models are busy right now. Please wait a few minutes and try again.",
-            options: null,
-            recommendations: null
-          })
-        }]
-      });
+      // Waqtiga ugu yar ee la sugayo ka hor inta model uu furmin
+      const waits = MODELS.filter(isCoolingDown).map(secondsLeft);
+      const retryAfter = waits.length ? Math.min(...waits) : DEFAULT_WAIT_SEC;
+      res.set("Retry-After", String(retryAfter));
+      return res.status(429).json(busyReply(retryAfter));
     }
 
     try {
@@ -212,7 +263,6 @@ Respond ONLY with valid JSON:
     }
 
     res.json({ content: [{ text }] });
-
   } catch (err) {
     console.error("Route error:", err.message);
     res.status(500).json({ error: err.message });

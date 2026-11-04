@@ -3,6 +3,8 @@ import useShopContext from "../ShopContext";
 import { AuthContext } from "../context/AuthContext";
 import API from "../api";
 
+const MAX_HISTORY = 6; // fariimaha ugu dambeeya ee loo diro backend-ka
+
 const AIChatbot = () => {
   const { addToCart } = useShopContext();
   const { user } = useContext(AuthContext);
@@ -18,6 +20,7 @@ const AIChatbot = () => {
   const [loading, setLoading] = useState(false);
   const [products, setProducts] = useState([]);
   const [addedIds, setAddedIds] = useState({});
+  const [cooldown, setCooldown] = useState(0); // ✅ countdown marka 429 yimaado
 
   const bottomRef = useRef(null);
   const inputRef = useRef(null);
@@ -50,6 +53,13 @@ const AIChatbot = () => {
     if (!user || !storageKey || messages.length === 0) return;
     localStorage.setItem(storageKey, JSON.stringify(messages));
   }, [messages, user]);
+
+  // ✅ Cooldown countdown
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
 
   // ✅ WELCOME MESSAGE
   useEffect(() => {
@@ -133,10 +143,23 @@ const AIChatbot = () => {
     catch { return { message: cleaned, options: null, recommendations: null }; }
   };
 
+  // ✅ Product raadi: index (#), _id, ama magac
+  const findProduct = (rec) => {
+    const key = String(rec?.id ?? "").replace("#", "").trim();
+    if (/^\d+$/.test(key)) {
+      const byIndex = products[Number(key) - 1];
+      if (byIndex) return byIndex;
+    }
+    return (
+      products.find(p => p._id?.toString() === key) ||
+      products.find(p => p.name?.toLowerCase() === rec?.name?.toLowerCase())
+    );
+  };
+
   // ✅ SEND MESSAGE
   const sendMessage = async (text) => {
     const userText = text || input.trim();
-    if (!userText || loading) return;
+    if (!userText || loading || cooldown > 0) return;
 
     setInput("");
     setLoading(true);
@@ -144,8 +167,9 @@ const AIChatbot = () => {
     const newMessages = [...messages, { role: "user", text: userText }];
     setMessages(newMessages);
 
+    // ✅ Menu kooban: index gaaban halkii _id dheer (tokens badan ayuu badbaadiyaa)
     const menuContext = products.length > 0
-      ? products.map(p => `- ${p.name} | $${p.price} | ${p.category} | id:${p._id}`).join("\n")
+      ? products.map((p, i) => `${i + 1}|${p.name}|$${p.price}|${p.category}`).join("\n")
       : "No products available";
 
     const userName = user?.name || "Customer";
@@ -175,7 +199,7 @@ CRITICAL: Respond ONLY with valid JSON:
       systemPrompt = `You are "Malabaani Food AI", a friendly food assistant for MALABAANI restaurant.
 You are helping: ${userName}
 
-Available menu (use EXACT ids):
+Menu (format: number|name|price|category). Use the NUMBER as the id:
 ${menuContext}
 
 Your job:
@@ -191,7 +215,7 @@ CRITICAL: Respond ONLY with valid JSON:
   "options": ["option 1", "option 2"] or null,
   "recommendations": [
     {
-      "id": "EXACT_PRODUCT_ID",
+      "id": "MENU_NUMBER",
       "name": "product name",
       "price": price_number,
       "emoji": "food emoji",
@@ -210,10 +234,14 @@ RULES:
     }
 
     try {
-      const conversationHistory = newMessages.map(m => ({
-        role: m.role === "assistant" ? "assistant" : "user",
-        content: m.text
-      }));
+      // ✅ Ka saar fariimaha error + kaliya kuwa ugu dambeeya
+      const conversationHistory = newMessages
+        .filter(m => !m.isError)
+        .slice(-MAX_HISTORY)
+        .map(m => ({
+          role: m.role === "assistant" ? "assistant" : "user",
+          content: m.text
+        }));
 
       const res = await API.post("/ai/chat", {
         system: systemPrompt,
@@ -230,10 +258,7 @@ RULES:
       let recommendations = null;
       if (!isAdmin && parsed.recommendations && Array.isArray(parsed.recommendations)) {
         recommendations = parsed.recommendations.map(rec => {
-          const dbProduct =
-            products.find(p => p._id === rec.id) ||
-            products.find(p => p._id?.toString() === rec.id?.toString()) ||
-            products.find(p => p.name?.toLowerCase() === rec.name?.toLowerCase());
+          const dbProduct = findProduct(rec);
           if (dbProduct) {
             return {
               ...rec,
@@ -262,9 +287,22 @@ RULES:
 
     } catch (err) {
       console.error("AI error:", err);
+
+      let errorText = "⚠️ Something went wrong. Please try again!";
+
+      if (err.response?.status === 429) {
+        const retryAfter =
+          Number(err.response.data?.retryAfter) ||
+          Number(err.response.headers?.["retry-after"]) ||
+          20;
+        setCooldown(retryAfter);
+        errorText = `⏳ The AI is busy right now. Please try again in ${retryAfter} seconds.`;
+      }
+
       setMessages(prev => [...prev, {
         role: "assistant",
-        text: "⚠️ Something went wrong. Please try again!"
+        text: errorText,
+        isError: true
       }]);
     }
     setLoading(false);
@@ -272,10 +310,7 @@ RULES:
 
   // ✅ ADD TO CART
   const handleAddToCart = (rec) => {
-    const dbProduct =
-      products.find(p => p._id === rec.id) ||
-      products.find(p => p._id?.toString() === rec.id?.toString()) ||
-      products.find(p => p.name?.toLowerCase() === rec.name?.toLowerCase());
+    const dbProduct = findProduct(rec);
 
     addToCart(dbProduct || {
       _id: rec.id, id: rec.id,
@@ -316,6 +351,8 @@ RULES:
       : "linear-gradient(135deg, #1a73e8, #0d47a1)";
 
   const accentColor = isAdmin ? "#7c3aed" : "#1a73e8";
+
+  const blocked = loading || cooldown > 0;
 
   return (
     <>
@@ -420,12 +457,15 @@ RULES:
                         <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "8px" }}>
                           {msg.options.map((opt, j) => (
                             <button key={j} onClick={() => sendMessage(opt.value)}
+                              disabled={blocked}
                               style={{
                                 padding: "6px 12px", background: "white",
                                 border: `1.5px solid ${accentColor}`, borderRadius: "20px",
-                                fontSize: "12px", color: accentColor, cursor: "pointer", fontWeight: "500"
+                                fontSize: "12px", color: accentColor,
+                                cursor: blocked ? "not-allowed" : "pointer",
+                                opacity: blocked ? 0.5 : 1, fontWeight: "500"
                               }}
-                              onMouseEnter={e => { e.target.style.background = accentColor; e.target.style.color = "white"; }}
+                              onMouseEnter={e => { if (!blocked) { e.target.style.background = accentColor; e.target.style.color = "white"; } }}
                               onMouseLeave={e => { e.target.style.background = "white"; e.target.style.color = accentColor; }}
                             >{opt.label}</button>
                           ))}
@@ -506,20 +546,24 @@ RULES:
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => e.key === "Enter" && sendMessage()}
-              placeholder={isAdmin ? "Ask about your business stats..." : "Type a message..."}
-              disabled={loading}
+              placeholder={
+                cooldown > 0
+                  ? `⏳ Wait ${cooldown}s...`
+                  : isAdmin ? "Ask about your business stats..." : "Type a message..."
+              }
+              disabled={blocked}
               style={{
                 flex: 1, padding: "10px 14px", border: "1.5px solid #e0e0e0",
                 borderRadius: "20px", fontSize: "13px", outline: "none",
                 background: isAdmin ? "#f5f3ff" : "#f8f9ff", color: "#333", margin: 0
               }}
             />
-            <button onClick={() => sendMessage()} disabled={!input.trim() || loading}
+            <button onClick={() => sendMessage()} disabled={!input.trim() || blocked}
               style={{
                 width: "40px", height: "40px", borderRadius: "50%",
-                background: input.trim() && !loading ? accentColor : "#e0e0e0",
+                background: input.trim() && !blocked ? accentColor : "#e0e0e0",
                 color: "white", border: "none", fontSize: "16px",
-                cursor: input.trim() && !loading ? "pointer" : "not-allowed",
+                cursor: input.trim() && !blocked ? "pointer" : "not-allowed",
                 display: "flex", alignItems: "center", justifyContent: "center",
                 flexShrink: 0, transition: "background 0.2s"
               }}>➤</button>
