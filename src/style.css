@@ -2349,3 +2349,8 @@ input:focus {
   .pd-main { grid-template-columns: 1fr; padding: 16px; gap: 20px; }
   .pd-info h1 { font-size: 26px; }
 }
+
+/* Favorite active + Remove button */
+.pd-fav.active { background: #ef4444; color: #fff; }
+.pd-add.remove { background: #e74c3c; }
+.pd-add.remove:hover { background: #c0392b; }
