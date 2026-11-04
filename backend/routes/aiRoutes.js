@@ -6,26 +6,54 @@ const Order = require("../models/Order");
 const Review = require("../models/Review");
 const Product = require("../models/Product");
 
-// ✅ Models cusub (kuwii hore waa deprecated). Ugu horreeya = ugu dhaqsaha.
-const MODELS = [
+// ✅ Models la door bidayo (kuwa Groq ka waayo si otomaatig ah ayaa looga saarayaa)
+const PREFERRED_MODELS = [
   "llama-3.1-8b-instant",
   "llama-3.3-70b-versatile",
   "openai/gpt-oss-20b",
   "meta-llama/llama-4-scout-17b-16e-instruct",
 ];
 
-const MAX_HISTORY = 8;        // fariimaha ugu dambeeya ee loo diro AI
-const MAX_TOKENS = 600;       // 1000 ahaa -> waxay cunaysay TPM
+const MAX_HISTORY = 8;
+const MAX_TOKENS = 600;
 const DEFAULT_WAIT_SEC = 20;
+const MAX_WAIT_SHOWN = 60;       // UI ma tusayo wax ka badan 60s
+const ERROR_COOLDOWN_MS = 2 * 60 * 1000; // error aan ahayn 429: 2 daqiiqo
 
-// ✅ Model kasta cooldown u gaar ah (rate limit ama model-ka oo meesha ka maqan)
-const cooldowns = {}; // { modelName: timestampMs }
+const cooldowns = {};
+const isCoolingDown = (m) => (cooldowns[m] || 0) > Date.now();
+const secondsLeft = (m) =>
+  Math.max(1, Math.ceil(((cooldowns[m] || 0) - Date.now()) / 1000));
 
-const isCoolingDown = (model) => (cooldowns[model] || 0) > Date.now();
-const secondsLeft = (model) =>
-  Math.max(1, Math.ceil(((cooldowns[model] || 0) - Date.now()) / 1000));
+// ✅ Hubi models-ka dhabta ah ee Groq (cache 10 daqiiqo)
+let modelCache = { list: null, time: 0 };
 
-const callGroq = (messages, model) =>
+const getModels = async () => {
+  if (modelCache.list && Date.now() - modelCache.time < 10 * 60 * 1000) {
+    return modelCache.list;
+  }
+  try {
+    const r = await fetch("https://api.groq.com/openai/v1/models", {
+      headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
+    });
+    if (!r.ok) throw new Error(`models list status ${r.status}`);
+    const data = await r.json();
+    const available = new Set((data.data || []).map((m) => m.id));
+    const list = PREFERRED_MODELS.filter((m) => available.has(m));
+
+    const missing = PREFERRED_MODELS.filter((m) => !available.has(m));
+    if (missing.length) console.warn("⚠️ Models aan Groq ku jirin:", missing.join(", "));
+
+    modelCache = { list: list.length ? list : PREFERRED_MODELS, time: Date.now() };
+    console.log("✅ Models active:", modelCache.list.join(", "));
+  } catch (err) {
+    console.error("⚠️ Models list failed:", err.message);
+    modelCache = { list: PREFERRED_MODELS, time: Date.now() };
+  }
+  return modelCache.list;
+};
+
+const callGroq = (messages, model, useJsonMode = true) =>
   fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -37,11 +65,11 @@ const callGroq = (messages, model) =>
       messages,
       max_tokens: MAX_TOKENS,
       temperature: 0.3,
-      response_format: { type: "json_object" },
+      ...(useJsonMode ? { response_format: { type: "json_object" } } : {}),
     }),
   });
 
-// ✅ Admin stats cache (60s) si DB-ga loogu garaacin codsi kasta
+// ✅ Admin stats cache (60s)
 let statsCache = { data: null, time: 0 };
 const STATS_TTL = 60 * 1000;
 
@@ -57,9 +85,7 @@ const getAdminStats = async () => {
     Product.countDocuments(),
   ]);
 
-  // Hal mar ayaa orders loo akhriyaa (hore waa saddex jeer)
   const orders = await Order.find().select("total items").lean();
-
   const totalRevenue = orders.reduce((acc, o) => acc + (Number(o.total) || 0), 0);
 
   const productSales = {};
@@ -130,26 +156,25 @@ router.post("/chat", async (req, res) => {
       return res.status(400).json({ error: "Messages array required" });
     }
 
+    if (!process.env.GROQ_API_KEY) {
+      console.error("❌ GROQ_API_KEY ma jiro .env faylka!");
+      return res.status(500).json({ error: "GROQ_API_KEY missing on server" });
+    }
+
     let adminStats = null;
 
-    // ✅ Admin xogta fetch
     if (isAdmin && adminToken) {
       try {
         const token = adminToken.startsWith("Bearer ")
           ? adminToken.slice(7)
           : adminToken;
-
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-        if (decoded) {
-          adminStats = await getAdminStats();
-        }
+        if (decoded) adminStats = await getAdminStats();
       } catch (err) {
         console.error("❌ Token/Stats error:", err.message);
       }
     }
 
-    // ✅ System prompt
     let finalSystem = system || "You are a helpful assistant.";
 
     if (adminStats) {
@@ -189,7 +214,6 @@ Respond ONLY with valid JSON:
 }`;
     }
 
-    // ✅ Taariikhda gaabi (kaliya fariimaha ugu dambeeya)
     const trimmed = messages.slice(-MAX_HISTORY);
 
     const groqMessages = [
@@ -203,7 +227,8 @@ Respond ONLY with valid JSON:
       })),
     ];
 
-    // ✅ Models fallback + cooldown
+    const MODELS = await getModels();
+
     let text = "";
     let success = false;
 
@@ -215,7 +240,14 @@ Respond ONLY with valid JSON:
 
       try {
         console.log(`Trying model: ${model}`);
-        const response = await callGroq(groqMessages, model);
+        let response = await callGroq(groqMessages, model, true);
+
+        // Model-ku JSON mode ma taageero? Isku day la'aanteed
+        if (response.status === 400) {
+          const errData = await response.json().catch(() => ({}));
+          console.warn(`⚠️ ${model} 400: ${errData?.error?.message || "unknown"} -> retry without json mode`);
+          response = await callGroq(groqMessages, model, false);
+        }
 
         if (response.status === 429) {
           const retryAfter = parseInt(response.headers.get("retry-after"), 10) || DEFAULT_WAIT_SEC;
@@ -226,9 +258,8 @@ Respond ONLY with valid JSON:
 
         if (!response.ok) {
           const errData = await response.json().catch(() => ({}));
-          console.error(`❌ ${model} error:`, errData?.error?.message || response.status);
-          // Model-ka jabay / lagu waayay: 10 daqiiqo ka tag
-          cooldowns[model] = Date.now() + 10 * 60 * 1000;
+          console.error(`❌ ${model} error ${response.status}:`, errData?.error?.message || errData);
+          cooldowns[model] = Date.now() + ERROR_COOLDOWN_MS;
           continue;
         }
 
@@ -249,9 +280,11 @@ Respond ONLY with valid JSON:
     }
 
     if (!success) {
-      // Waqtiga ugu yar ee la sugayo ka hor inta model uu furmin
       const waits = MODELS.filter(isCoolingDown).map(secondsLeft);
-      const retryAfter = waits.length ? Math.min(...waits) : DEFAULT_WAIT_SEC;
+      const retryAfter = Math.min(
+        waits.length ? Math.min(...waits) : DEFAULT_WAIT_SEC,
+        MAX_WAIT_SHOWN
+      );
       res.set("Retry-After", String(retryAfter));
       return res.status(429).json(busyReply(retryAfter));
     }
@@ -259,7 +292,13 @@ Respond ONLY with valid JSON:
     try {
       JSON.parse(text);
     } catch {
-      text = JSON.stringify({ message: text, options: null, recommendations: null });
+      const m = text.match(/\{[\s\S]*\}/);
+      try {
+        JSON.parse(m?.[0]);
+        text = m[0];
+      } catch {
+        text = JSON.stringify({ message: text, options: null, recommendations: null });
+      }
     }
 
     res.json({ content: [{ text }] });
