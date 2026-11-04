@@ -2179,3 +2179,173 @@ input:focus {
     transition-duration: 0.01ms !important;
   }
 }
+@import url("https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap");
+
+.pd-page {
+  --primary: #2563eb;
+  --primary-dark: #1d4ed8;
+  --text: #111827;
+  --muted: #9ca3af;
+  --border: #eef0f4;
+  --star: #f59e0b;
+
+  font-family: "Poppins", sans-serif;
+  color: var(--text);
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 110px 16px 48px;
+}
+
+/* Breadcrumb */
+.pd-breadcrumb { font-size: 13px; color: var(--muted); margin-bottom: 20px; }
+.pd-breadcrumb a { color: var(--primary); text-decoration: none; font-weight: 500; }
+.pd-breadcrumb strong { color: var(--text); font-weight: 600; }
+
+/* Main card */
+.pd-main {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 40px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 24px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.06);
+}
+
+.pd-image { position: relative; }
+.pd-image img {
+  width: 100%;
+  height: 100%;
+  max-height: 460px;
+  object-fit: cover;
+  border-radius: 16px;
+  display: block;
+}
+
+.pd-fav {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 0;
+  background: #fff;
+  color: #ef4444;
+  font-size: 20px;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
+  transition: transform 0.2s;
+}
+.pd-fav:hover { transform: scale(1.1); }
+
+/* Info */
+.pd-info { display: flex; flex-direction: column; justify-content: center; }
+.pd-category {
+  align-self: flex-start;
+  background: #eff6ff;
+  color: var(--primary);
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  padding: 4px 12px;
+  border-radius: 999px;
+}
+.pd-info h1 { margin: 12px 0 6px; font-size: 32px; font-weight: 700; }
+
+.pd-rating { display: flex; align-items: center; gap: 6px; font-size: 14px; }
+.pd-stars { color: var(--star); letter-spacing: 1px; }
+.pd-muted { color: var(--muted); font-size: 13px; }
+
+.pd-price { font-size: 30px; font-weight: 700; margin: 16px 0 8px; }
+.pd-desc { color: #6b7280; line-height: 1.8; font-size: 15px; }
+
+/* Actions */
+.pd-actions { display: flex; gap: 12px; align-items: center; margin-top: 24px; }
+.pd-qty {
+  display: flex;
+  align-items: center;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.pd-qty button {
+  width: 40px;
+  height: 46px;
+  border: 0;
+  background: #f9fafb;
+  font-size: 20px;
+  cursor: pointer;
+}
+.pd-qty button:hover { background: #eff6ff; color: var(--primary); }
+.pd-qty span { min-width: 40px; text-align: center; font-weight: 600; }
+
+.pd-add {
+  flex: 1;
+  height: 46px;
+  background: var(--primary);
+  color: #fff;
+  border: 0;
+  border-radius: 12px;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.1s;
+}
+.pd-add:hover { background: var(--primary-dark); }
+.pd-add:active { transform: scale(0.98); }
+
+/* Sections */
+.pd-section { margin-top: 40px; }
+.pd-section h2 { font-size: 22px; font-weight: 700; margin-bottom: 16px; }
+
+.pd-review {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 16px;
+  margin-bottom: 10px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.03);
+}
+.pd-review p { margin: 6px 0 0; color: #6b7280; font-size: 14px; }
+
+/* Related */
+.pd-related {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 18px;
+}
+.pd-card {
+  text-decoration: none;
+  color: inherit;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.pd-card:hover { transform: translateY(-4px); box-shadow: 0 10px 26px rgba(0, 0, 0, 0.1); }
+.pd-card img { width: 100%; height: 140px; object-fit: cover; border-radius: 12px; }
+.pd-card h4 { margin: 10px 0 4px; font-size: 15px; font-weight: 600; }
+.pd-card span { font-weight: 700; }
+
+/* Loading / error */
+.pd-state { text-align: center; padding: 140px 16px; font-family: "Poppins", sans-serif; }
+.pd-state button {
+  margin-top: 12px;
+  padding: 10px 20px;
+  background: #2563eb;
+  color: #fff;
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+/* Mobile */
+@media (max-width: 768px) {
+  .pd-main { grid-template-columns: 1fr; padding: 16px; gap: 20px; }
+  .pd-info h1 { font-size: 26px; }
+}

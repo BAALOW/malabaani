@@ -20,6 +20,7 @@ import AdminRoute from "./AdminRoute";
 import { AuthProvider } from "./context/AuthContext";
 import { NotificationProvider } from "./context/NotificationContext";
 import AIChatbot from "./components/AIChatbot";
+import ProductDetails from "./pages/Productdetails";
 
 import "./style.css";
 
@@ -56,6 +57,7 @@ const App = () => {
             <Route path="/about" element={<About />} />
             <Route path="/contact" element={<Contact />} />
             <Route path="/cart" element={<Cart setCart={setCart} />} />
+            <Route path="/product/:id" element={<ProductDetails />} />
           </Routes>
         </div>
         <AIChatbot />
